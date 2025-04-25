@@ -144,7 +144,62 @@ if uploaded_file and openai.api_key:
 else:
     st.info("ℹ️ Please upload an image and provide your OpenAI key.")
 
+# Footer with export options and disclaimer
+st.markdown("---")
+with st.expander("📤 Export Options"):
+    if 'data' in locals():
+        col7, col8, col9 = st.columns(3)
+        # CSV Export
+        csv = pd.DataFrame(data['items']).to_csv(index=False).encode('utf-8')
+        col7.download_button(
+            label="Download Items as CSV",
+            data=csv,
+            file_name='invoice_items.csv',
+            mime='text/csv',
+        )
+        
+        # JSON Export
+        json_data = json.dumps(data, indent=2)
+        col8.download_button(
+            label="Download Full JSON",
+            data=json_data,
+            file_name='invoice_data.json',
+            mime='application/json',
+        )
+        
+        # HTML Summary
+        html_report = f"""
+        <html>
+            <body>
+                <h1>Invoice Report</h1>
+                <p>Invoice Number: {data['invoice_number']}</p>
+                <p>Date: {data['date']}</p>
+                <p>Vendor: {data['vendor']}</p>
+                {pd.DataFrame(data['items']).to_html()}
+            </body>
+        </html>
+        """
+        col9.download_button(
+            label="Download HTML Report",
+            data=html_report,
+            file_name='invoice_report.html',
+            mime='text/html',
+        )
+    else:
+        st.warning("No data available for export")
 
+st.markdown("---")
+st.caption("ℹ️ Note: Accuracy depends on image quality and invoice complexity. Always verify critical data.")
+
+# Optional: Add a sample image for testing
+with st.expander("🖼️ Need a test invoice?"):
+    st.markdown("Download a sample invoice image:")
+    st.download_button(
+        label="Download Sample Invoice",
+        data=open("sample_invoice.jpg", "rb"),
+        file_name="sample_invoice.jpg",
+        mime="image/jpeg"
+    )
 
 
 # import streamlit as st

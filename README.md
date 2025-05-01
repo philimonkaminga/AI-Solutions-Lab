@@ -2,7 +2,7 @@
 
 An AI-powered document analysis system for extracting structured data from invoices (images & PDFs).
 
-![Demo](https://ai-solutions-lab-invoice-scanner.streamlit.app/)
+![Demo](https://ai-solutions-lab-invoice-scanner.streamlit.app)
 
 ## Features ✨
 - Process JPG/PNG images and scanned PDF invoices

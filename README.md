@@ -1,9 +1,6 @@
 # Invoice Extractor 🧾
 
 An AI-powered document analysis system for extracting structured data from invoices (images & PDFs).
-
-![Demo](https://ai-solutions-lab-invoice-scanner.streamlit.app)
-
 ## Features ✨
 - Process JPG/PNG images and scanned PDF invoices
 - Extract key invoice data using GPT-4 Vision

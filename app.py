@@ -5,7 +5,7 @@ import base64
 import json
 import pandas as pd
 from io import BytesIO
-from pdf2image import convert_from_bytes
+import fitz  # PyMuPDF
 
 st.set_page_config(page_title="Invoice Expert", page_icon="🧾", layout="centered")
 st.title("🧾 Invoice Extractor")
@@ -87,15 +87,16 @@ def process_invoice(image_bytes):
     return response.choices[0].message.content.strip()
 
 def pdf_to_jpeg(pdf_bytes):
-    """Convert PDF to JPEG image bytes"""
-    images = convert_from_bytes(pdf_bytes)
-    if not images:
-        raise ValueError("No pages found in PDF")
-    
-    # Convert first page to JPEG bytes
-    img_byte_arr = BytesIO()
-    images[0].save(img_byte_arr, format='JPEG')
-    return img_byte_arr.getvalue()
+    """Convert PDF to JPEG image bytes using PyMuPDF"""
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        page = doc.load_page(0)  # First page
+        pix = page.get_pixmap()
+        img_bytes = pix.tobytes("jpeg")
+        return img_bytes
+    except Exception as e:
+        st.error(f"PDF conversion failed: {str(e)}")
+        st.stop()
 
 def display_invoice(data):
     """Display extracted invoice data"""
@@ -139,7 +140,7 @@ if uploaded_file and openai.api_key:
             image_bytes = uploaded_file.getvalue()
             
         elif uploaded_file.type == "application/pdf":
-            # Convert PDF to JPEG
+            # Convert PDF to JPEG using PyMuPDF
             pdf_bytes = uploaded_file.getvalue()
             image_bytes = pdf_to_jpeg(pdf_bytes)
             st.image(image_bytes, caption="First Page Preview", use_container_width=True)
@@ -180,13 +181,4 @@ with st.expander("📤 Export Options"):
             "text/csv"
         )
 
-st.caption("ℹ️ Supports JPG, PNG, and PDF invoices (first page only) Accuracy depends on document quality and complexity. Please verify.")
-# Optional sample invoice
-with st.expander("🖼️ Need a test invoice?"):
-    st.markdown("Download a sample invoice image:")
-    st.download_button(
-        label="Download Sample Invoice",
-        data=open("sample_invoice.jpg", "rb"),
-        file_name="sample_invoice.jpg",
-        mime="image/jpeg"
-    )
+st.caption("ℹ️ Supports JPG, PNG, and PDF invoices (first page only). Accuracy depends on document quality and complexity. Please verify.")

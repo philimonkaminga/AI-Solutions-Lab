@@ -152,7 +152,7 @@ if uploaded_file and openai.api_key:
         max_display_width = 1200  # Maximum display width in pixels
         
         if uploaded_file.type.startswith('image'):
-            st.image(uploaded_file, use_column_width=True)
+            st.image(uploaded_file, use_container_width=True)
             image_bytes = uploaded_file.getvalue()
             
         elif uploaded_file.type == "application/pdf":

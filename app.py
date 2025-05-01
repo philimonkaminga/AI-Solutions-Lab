@@ -4,14 +4,11 @@ from PIL import Image
 import base64
 import json
 import pandas as pd
-import pytesseract
-from PyPDF2 import PdfReader
-from pdf2image import convert_from_bytes
 from io import BytesIO
+from pdf2image import convert_from_bytes
 
-st.set_page_config(page_title="Document Analyzer", page_icon="📄", layout="centered")
-
-st.title("📄 Document Analysis System")
+st.set_page_config(page_title="Invoice Expert", page_icon="🧾", layout="centered")
+st.title("🧾 Invoice Extractor")
 
 # Initialize session state
 if 'processed_data' not in st.session_state:
@@ -20,10 +17,10 @@ if 'processed_data' not in st.session_state:
 # OpenAI API Key
 openai.api_key = st.text_input("🔑 Enter your OpenAI API Key", type="password")
 
-# File uploader with expanded format support
-uploaded_file = st.file_uploader("📤 Upload Document", type=["jpg", "jpeg", "png", "pdf"])
+# File uploader with supported formats
+uploaded_file = st.file_uploader("📤 Upload Invoice (JPG/PNG/PDF)", type=["jpg", "jpeg", "png", "pdf"])
 
-# Invoice schema validation with string type descriptors
+# Invoice schema validation
 REQUIRED_KEYS = {
     "invoice_number": "string",
     "date": "string",
@@ -37,63 +34,50 @@ REQUIRED_KEYS = {
 ITEM_KEYS = ["description", "quantity", "unit_price", "total_price"]
 
 def validate_json(data):
-    """Validate the structure and types of the JSON response"""
+    """Validate invoice JSON structure"""
     if not data or not isinstance(data, dict):
-        raise ValueError("Invalid or empty data received")
-    type_map = {
-        "string": str,
-        "number": (int, float),
-        "array": list
-    }
+        raise ValueError("Invalid invoice data format")
     
-    # Check top-level keys
+    # Check required fields
     missing_keys = [key for key in REQUIRED_KEYS if key not in data]
     if missing_keys:
-        raise ValueError(f"Missing required fields: {', '.join(missing_keys)}")
+        raise ValueError(f"Missing fields: {', '.join(missing_keys)}")
     
-    # Check types
-    for key, expected_type in REQUIRED_KEYS.items():
-        actual_value = data.get(key)
-        expected_py_type = type_map[expected_type]
+    # Validate items structure
+    if not isinstance(data['items'], list) or len(data['items']) == 0:
+        raise ValueError("Invalid items list")
+    
+    for item in data['items']:
+        missing = [k for k in ITEM_KEYS if k not in item]
+        if missing:
+            raise ValueError(f"Item missing: {', '.join(missing)}")
         
-        if not isinstance(actual_value, expected_py_type):
-            raise ValueError(f"Field '{key}' should be {expected_type}, got {type(actual_value).__name__}")
-    
-    # Check items structure
-    if not isinstance(data['items'], list):
-        raise ValueError("Items should be a list")
-    
-    for i, item in enumerate(data['items']):
-        missing_item_keys = [key for key in ITEM_KEYS if key not in item]
-        if missing_item_keys:
-            raise ValueError(f"Item {i+1} missing fields: {', '.join(missing_item_keys)}")
-        
-        # Check numeric fields
-        for field in ['quantity', 'unit_price', 'total_price']:
-            if not isinstance(item[field], (int, float)):
-                raise ValueError(f"Item {i+1} {field} should be numeric")
+        if not all(isinstance(item[k], (int, float)) for k in ['quantity', 'unit_price', 'total_price']):
+            raise ValueError("Invalid numeric values in items")
 
-def process_invoice(content, is_image=False):
-    """Process invoice from image or text"""
-    messages = []
+def process_invoice(image_bytes):
+    """Process invoice image using GPT-4 Vision"""
+    base64_image = base64.b64encode(image_bytes).decode('utf-8')
     
-    if is_image:
-        image_url = f"data:image/jpeg;base64,{content}"
-        messages.append({"type": "image_url", "image_url": {"url": image_url}})
-    else:
-        messages.append({"type": "text", "text": content})
+    messages = [{
+        "type": "image_url",
+        "image_url": {
+            "url": f"data:image/jpeg;base64,{base64_image}"
+        }
+    }]
     
-    messages.append({"type": "text", "text": f"""
-        Extract from this {'image' if is_image else 'document'} as JSON with:
+    messages.append({
+        "type": "text",
+        "text": """Extract structured invoice data as JSON with:
         - invoice_number (string)
         - date (string)
         - vendor (string)
-        - items (array of objects with description, quantity, unit_price, total_price)
+        - items (array of {description, quantity, unit_price, total_price})
         - subtotal (number)
         - tax (number)
         - total (number)
-        Return ONLY the JSON object without any formatting or explanations.
-    """})
+        Return ONLY valid JSON without comments"""
+    })
 
     response = openai.chat.completions.create(
         model="gpt-4-turbo",
@@ -102,185 +86,101 @@ def process_invoice(content, is_image=False):
     )
     return response.choices[0].message.content.strip()
 
-def summarize_report(text):
-    """Generate summary for text-based documents"""
-    response = openai.chat.completions.create(
-        model="gpt-4",
-        messages=[{
-            "role": "user",
-            "content": f"Summarize this document in 3-5 key points:\n{text[:3000]}"
-        }]
+def pdf_to_jpeg(pdf_bytes):
+    """Convert PDF to JPEG image bytes"""
+    images = convert_from_bytes(pdf_bytes)
+    if not images:
+        raise ValueError("No pages found in PDF")
+    
+    # Convert first page to JPEG bytes
+    img_byte_arr = BytesIO()
+    images[0].save(img_byte_arr, format='JPEG')
+    return img_byte_arr.getvalue()
+
+def display_invoice(data):
+    """Display extracted invoice data"""
+    st.session_state.processed_data = data
+    
+    st.success("✅ Invoice data extracted successfully!")
+    
+    # Header Info
+    cols = st.columns(3)
+    cols[0].metric("Invoice Number", data.get('invoice_number', 'N/A'))
+    cols[1].metric("Date", data.get('date', 'N/A'))
+    cols[2].metric("Vendor", data.get('vendor', 'N/A'))
+
+    # Items Table
+    st.subheader("Items")
+    items_df = pd.DataFrame(data['items'])
+    items_df.index += 1
+    st.dataframe(
+        items_df.style.format({
+            'unit_price': 'ZMW{:.2f}',
+            'total_price': 'ZMW{:.2f}',
+            'quantity': '{:.0f}'
+        }),
+        use_container_width=True
     )
-    return response.choices[0].message.content.strip()
 
-def handle_pdf(uploaded_file):
-    """Process PDF files"""
-    try:
-        # Try text extraction first
-        pdf = PdfReader(uploaded_file)
-        text = "\n".join([page.extract_text() for page in pdf.pages])
-        
-        if len(text) > 100:  # Consider as text PDF
-            return "report", text
-        else:  # Process as image PDF
-            images = convert_from_bytes(uploaded_file.getvalue())
-            return "invoice", [image_to_base64(img) for img in images]
-            
-    except Exception as e:
-        st.error(f"PDF processing error: {str(e)}")
-        return None, None
-
-def image_to_base64(image):
-    """Convert PIL image to base64"""
-    buffered = BytesIO()
-    image.save(buffered, format="JPEG")
-    return base64.b64encode(buffered.getvalue()).decode("utf-8")
+    # Totals
+    st.subheader("Totals")
+    cols = st.columns(3)
+    cols[0].metric("Subtotal", f"ZMW{data['subtotal']:.2f}")
+    cols[1].metric("Tax", f"ZMW{data['tax']:.2f}")
+    cols[2].metric("Total", f"ZMW{data['total']:.2f}")
 
 if uploaded_file and openai.api_key:
-    file_type = uploaded_file.type
-    content = None
-    doc_type = None
+    try:
+        image_bytes = None
+        
+        if uploaded_file.type.startswith('image'):
+            # Process image files directly
+            st.image(uploaded_file, use_container_width=True)
+            image_bytes = uploaded_file.getvalue()
+            
+        elif uploaded_file.type == "application/pdf":
+            # Convert PDF to JPEG
+            pdf_bytes = uploaded_file.getvalue()
+            image_bytes = pdf_to_jpeg(pdf_bytes)
+            st.image(image_bytes, caption="First Page Preview", use_container_width=True)
 
-    if file_type in ["image/jpeg", "image/png"]:
-        try:
-            image = Image.open(uploaded_file)
-            st.image(image, use_container_width=True)
-            content = base64.b64encode(uploaded_file.getvalue()).decode("utf-8")
-            doc_type = "invoice"
-        except Exception as e:
-            st.error(f"❌ Image processing error: {str(e)}")
-            st.stop()
+        if image_bytes and st.button("Extract Invoice Data"):
+            with st.spinner("Analyzing document..."):
+                result = process_invoice(image_bytes)
+                cleaned = result.replace('```json', '').replace('```', '').strip()
+                data = json.loads(cleaned)
+                validate_json(data)
+                display_invoice(data)
 
-    elif file_type == "application/pdf":
-        doc_type, content = handle_pdf(uploaded_file)
-        if not doc_type or not content:
-            st.error("❌ Failed to process PDF file")
-            st.stop()
+    except Exception as e:
+        st.error(f"❌ Processing error: {str(e)}")
+        st.session_state.processed_data = None
 
-    if st.button("Analyze Document"):
-        with st.spinner("Processing..."):
-            try:
-                if doc_type == "invoice":
-                    images = content if isinstance(content, list) else [content]
-                    all_data = []
-                    
-                    for img in images:
-                        result = process_invoice(img, is_image=True)
-                        cleaned = result.replace('```json', '').replace('```', '').strip()
-                        data = json.loads(cleaned)
-                        validate_json(data)
-                        all_data.append(data)
-                    
-                    # Store first invoice data in session state
-                    st.session_state.processed_data = all_data[0]
-                    
-                    st.success("✅ Data extracted successfully!")
-                    
-                    # Header information
-                    st.markdown("##### 📋 Invoice Summary")
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Invoice Number", st.session_state.processed_data.get("invoice_number", "N/A"))
-                    col2.metric("Date", st.session_state.processed_data.get("date", "N/A"))
-                    col3.metric("Vendor", st.session_state.processed_data.get("vendor", "N/A"))
-
-                    # Items table
-                    st.markdown("##### 🛒 Items")
-                    items_df = pd.DataFrame(st.session_state.processed_data["items"])
-                    items_df.index += 1
-                    st.dataframe(
-                        items_df.style.format({
-                            'unit_price': 'ZMW{:.2f}',
-                            'total_price': 'ZMW{:.2f}',
-                            'quantity': '{:.0f}'
-                        }),
-                        use_container_width=True
-                    )
-
-                    # Totals
-                    st.markdown("##### 💰 Totals")
-                    col4, col5, col6 = st.columns(3)
-                    col4.metric("Subtotal", f"ZMW{st.session_state.processed_data['subtotal']:.2f}")
-                    col5.metric("Tax", f"ZMW{st.session_state.processed_data['tax']:.2f}")
-                    col6.metric("Total", f"ZMW{st.session_state.processed_data['total']:.2f}")
-
-                    # Raw JSON expander
-                    with st.expander("View Raw JSON"):
-                        st.json(st.session_state.processed_data)
-
-                elif doc_type == "report":
-                    # Clear previous invoice data
-                    st.session_state.processed_data = None
-                    summary = summarize_report(content)
-                    st.markdown("## 📝 Document Summary")
-                    st.write(summary)
-                    
-                    with st.expander("View Full Text"):
-                        st.text(content[:5000])
-
-            except json.JSONDecodeError as e:
-                st.error("❌ Failed to parse JSON response")
-                st.code(result if 'result' in locals() else content[:500], language="text")
-                st.stop()
-            except ValueError as ve:
-                st.error(f"❌ Validation error: {str(ve)}")
-                st.code(cleaned if 'cleaned' in locals() else content[:500], language="json")
-                st.stop()
-            except Exception as e:
-                st.session_state.processed_data = None
-                st.error(f"❌ Processing error: {str(e)}")
-                st.stop()
-
-else:
-    st.info("ℹ️ Please upload a document and provide your OpenAI key.")
-
-# Footer with export options
+# Export Section
 st.markdown("---")
 with st.expander("📤 Export Options"):
-    if st.session_state.processed_data is not None:
-        col7, col8, col9 = st.columns(3)
-        
-        # CSV Export
-        csv = pd.DataFrame(st.session_state.processed_data['items']).to_csv(index=False).encode('utf-8')
-        col7.download_button(
-            label="Download Items as CSV",
-            data=csv,
-            file_name='invoice_items.csv',
-            mime='text/csv',
-        )
+    if st.session_state.processed_data:
+        col1, col2 = st.columns(2)
         
         # JSON Export
         json_data = json.dumps(st.session_state.processed_data, indent=2)
-        col8.download_button(
-            label="Download Full JSON",
-            data=json_data,
-            file_name='invoice_data.json',
-            mime='application/json',
+        col1.download_button(
+            "Download JSON",
+            json_data,
+            "invoice_data.json",
+            "application/json"
         )
         
-        # HTML Summary
-        html_report = f"""
-        <html>
-            <body>
-                <h1>Invoice Report</h1>
-                <p>Invoice Number: {st.session_state.processed_data['invoice_number']}</p>
-                <p>Date: {st.session_state.processed_data['date']}</p>
-                <p>Vendor: {st.session_state.processed_data['vendor']}</p>
-                {pd.DataFrame(st.session_state.processed_data['items']).to_html()}
-            </body>
-        </html>
-        """
-        col9.download_button(
-            label="Download HTML Report",
-            data=html_report,
-            file_name='invoice_report.html',
-            mime='text/html',
+        # CSV Export
+        csv = pd.DataFrame(st.session_state.processed_data['items']).to_csv(index=False)
+        col2.download_button(
+            "Download Items CSV",
+            csv,
+            "invoice_items.csv",
+            "text/csv"
         )
-    else:
-        st.warning("No data available for export")
 
-st.markdown("---")
-st.caption("ℹ️ Note: Accuracy depends on document quality and complexity. Always verify critical data.")
-
+st.caption("ℹ️ Supports JPG, PNG, and PDF invoices (first page only) Accuracy depends on document quality and complexity. Please verify.")
 # Optional sample invoice
 with st.expander("🖼️ Need a test invoice?"):
     st.markdown("Download a sample invoice image:")

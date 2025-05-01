@@ -1,14 +1,14 @@
 import streamlit as st
 import openai
-from PIL import Image
 import base64
 import json
 import pandas as pd
 from io import BytesIO
 import fitz  # PyMuPDF
+from PIL import Image
 
 st.set_page_config(page_title="Invoice Expert", page_icon="🧾", layout="centered")
-st.title("🧾 Invoice Extractor")
+st.title("🧾 Invoice Extractor Pro")
 
 # Initialize session state
 if 'processed_data' not in st.session_state:
@@ -38,12 +38,10 @@ def validate_json(data):
     if not data or not isinstance(data, dict):
         raise ValueError("Invalid invoice data format")
     
-    # Check required fields
     missing_keys = [key for key in REQUIRED_KEYS if key not in data]
     if missing_keys:
         raise ValueError(f"Missing fields: {', '.join(missing_keys)}")
     
-    # Validate items structure
     if not isinstance(data['items'], list) or len(data['items']) == 0:
         raise ValueError("Invalid items list")
     
@@ -86,14 +84,19 @@ def process_invoice(image_bytes):
     )
     return response.choices[0].message.content.strip()
 
-def pdf_to_jpeg(pdf_bytes):
-    """Convert PDF to JPEG image bytes using PyMuPDF"""
+def pdf_to_jpeg(pdf_bytes, zoom=2.0):
+    """Convert PDF to JPEG with adjustable zoom"""
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        page = doc.load_page(0)  # First page
-        pix = page.get_pixmap()
-        img_bytes = pix.tobytes("jpeg")
-        return img_bytes
+        page = doc.load_page(0)
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        
+        # Save as JPEG with quality preservation
+        img_byte_arr = BytesIO()
+        img.save(img_byte_arr, format='JPEG', quality=95)
+        return img_byte_arr.getvalue()
     except Exception as e:
         st.error(f"PDF conversion failed: {str(e)}")
         st.stop()
@@ -104,14 +107,13 @@ def display_invoice(data):
     
     st.success("✅ Invoice data extracted successfully!")
     
-    # Header Info
-    cols = st.columns(3)
-    cols[0].metric("Invoice Number", data.get('invoice_number', 'N/A'))
-    cols[1].metric("Date", data.get('date', 'N/A'))
-    cols[2].metric("Vendor", data.get('vendor', 'N/A'))
+    with st.container():
+        cols = st.columns(3)
+        cols[0].metric("Invoice Number", data.get('invoice_number', 'N/A'))
+        cols[1].metric("Date", data.get('date', 'N/A'))
+        cols[2].metric("Vendor", data.get('vendor', 'N/A'))
 
-    # Items Table
-    st.subheader("Items")
+    st.subheader("Items List")
     items_df = pd.DataFrame(data['items'])
     items_df.index += 1
     st.dataframe(
@@ -120,30 +122,31 @@ def display_invoice(data):
             'total_price': 'ZMW{:.2f}',
             'quantity': '{:.0f}'
         }),
-        use_container_width=True
+        use_container_width=True,
+        height=400
     )
 
-    # Totals
-    st.subheader("Totals")
-    cols = st.columns(3)
-    cols[0].metric("Subtotal", f"ZMW{data['subtotal']:.2f}")
-    cols[1].metric("Tax", f"ZMW{data['tax']:.2f}")
-    cols[2].metric("Total", f"ZMW{data['total']:.2f}")
+    with st.container():
+        cols = st.columns(3)
+        cols[0].metric("Subtotal", f"ZMW{data['subtotal']:.2f}")
+        cols[1].metric("Tax", f"ZMW{data['tax']:.2f}")
+        cols[2].metric("Total", f"ZMW{data['total']:.2f}")
 
 if uploaded_file and openai.api_key:
     try:
         image_bytes = None
+        preview_width = 700  # Fixed preview width for better control
         
         if uploaded_file.type.startswith('image'):
-            # Process image files directly
-            st.image(uploaded_file, use_container_width=True)
+            st.image(uploaded_file, width=preview_width)
             image_bytes = uploaded_file.getvalue()
             
         elif uploaded_file.type == "application/pdf":
-            # Convert PDF to JPEG using PyMuPDF
             pdf_bytes = uploaded_file.getvalue()
-            image_bytes = pdf_to_jpeg(pdf_bytes)
-            st.image(image_bytes, caption="First Page Preview", use_container_width=True)
+            # Add zoom control for PDF previews
+            zoom_level = st.slider("PDF Preview Zoom", 1.0, 3.0, 1.5, 0.1)
+            image_bytes = pdf_to_jpeg(pdf_bytes, zoom=zoom_level)
+            st.image(image_bytes, width=preview_width)
 
         if image_bytes and st.button("Extract Invoice Data"):
             with st.spinner("Analyzing document..."):
@@ -159,26 +162,30 @@ if uploaded_file and openai.api_key:
 
 # Export Section
 st.markdown("---")
-with st.expander("📤 Export Options"):
+with st.expander("📤 Export Options", expanded=True):
     if st.session_state.processed_data:
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         
-        # JSON Export
-        json_data = json.dumps(st.session_state.processed_data, indent=2)
         col1.download_button(
             "Download JSON",
-            json_data,
+            json.dumps(st.session_state.processed_data, indent=2),
             "invoice_data.json",
             "application/json"
         )
         
-        # CSV Export
         csv = pd.DataFrame(st.session_state.processed_data['items']).to_csv(index=False)
         col2.download_button(
-            "Download Items CSV",
+            "Download CSV",
             csv,
             "invoice_items.csv",
             "text/csv"
         )
+        
+        col3.download_button(
+            "Download Preview",
+            image_bytes if 'image_bytes' in locals() else b'',
+            "document_preview.jpg",
+            "image/jpeg"
+        )
 
-st.caption("ℹ️ Supports JPG, PNG, and PDF invoices (first page only). Accuracy depends on document quality and complexity. Please verify.")
+st.caption("ℹ️ Tip: Use the zoom slider for PDFs to improve preview clarity before extraction")

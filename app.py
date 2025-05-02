@@ -10,7 +10,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 
 st.set_page_config(page_title="Invoice Expert", page_icon="🧾", layout="centered")
-st.title("🧾 Professional Invoice Analyzer")
+st.title("🧾 Invoice Extractor")
 
 # Initialize session state
 if 'processed_data' not in st.session_state:
@@ -118,7 +118,7 @@ def display_invoice(data):
     """Display extracted invoice data with enhanced layout"""
     st.session_state.processed_data = data
     
-    st.success("✅ Invoice data extracted successfully!")
+    st.success("Invoice data extracted successfully! ✅ ")
     
     with st.container():
         cols = st.columns(3)
@@ -126,7 +126,7 @@ def display_invoice(data):
         cols[1].metric("Date", data.get('date', 'N/A'))
         cols[2].metric("Vendor", data.get('vendor', 'N/A'))
 
-    st.subheader("📦 Itemized List")
+    st.subheader("Items")
     items_df = pd.DataFrame(data['items'])
     items_df.index += 1
     st.dataframe(
@@ -222,14 +222,14 @@ with st.expander("📁 Export Options", expanded=True):
             help="Download processed page image"
         )
 
-st.caption("ℹ️ For best results: Use clear scans with visible numbers. Max file size: 20MB")
+st.caption("ℹ️ For best results: Use clear scans with visible numbers. Max file size: 20MB. Accuracy depends on the quality of the image or scanned pdf.")
 
-# System requirements
-with st.expander("⚙️ System Recommendations"):
-    st.markdown("""
-    **Optimal performance tips:**
-    - Use zoom levels between 2x-5x for most documents
-    - Ensure documents have minimum 300 DPI resolution
-    - Process multi-page PDFs one page at a time
-    - Verify extracted amounts match document totals
-    """)
+# # System requirements
+# with st.expander("⚙️ System Recommendations"):
+#     st.markdown("""
+#     **Optimal performance tips:**
+#     - Use zoom levels between 2x-5x for most documents
+#     - Ensure documents have minimum 300 DPI resolution
+#     - Process multi-page PDFs one page at a time
+#     - Verify extracted amounts match document totals
+#     """)
